@@ -1,1 +1,1 @@
-"""Tool contracts only. No executable tools are registered or implemented."""
+"""Direct-call deterministic tools. No registry, dispatcher, or AI access."""
