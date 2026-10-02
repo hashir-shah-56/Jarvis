@@ -1,1 +1,2 @@
-# Stage 1 uses only the Python standard library. No third-party dependencies.
+# Reliable CPU utilization, physical memory, and bounded process summaries.
+psutil==7.2.2

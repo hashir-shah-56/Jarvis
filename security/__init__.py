@@ -1,1 +1,1 @@
-"""Documented security boundaries; enforcement is planned for Stage 4."""
+"""Stage 2 input validation; active permission/policy enforcement is Stage 4."""
