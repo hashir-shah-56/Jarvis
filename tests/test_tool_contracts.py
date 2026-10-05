@@ -1,4 +1,4 @@
-"""Metadata completeness and direct-call boundaries, without a runtime registry."""
+"""Metadata completeness, source security, and Python compatibility boundaries."""
 
 import ast
 import inspect
@@ -68,7 +68,7 @@ class ToolContractTests(unittest.TestCase):
                     if not isinstance(node, ast.Call):
                         continue
                     if isinstance(node.func, ast.Name):
-                        self.assertNotIn(node.func.id, {"eval", "exec", "compile"}, str(file))
+                        self.assertNotIn(node.func.id, {"eval", "exec", "compile", "__import__"}, str(file))
                     if isinstance(node.func, ast.Attribute):
                         if isinstance(node.func.value, ast.Name) and node.func.value.id == "os":
                             self.assertNotIn(node.func.attr, {"system", "popen"}, str(file))
@@ -78,6 +78,40 @@ class ToolContractTests(unittest.TestCase):
                         if keyword.arg == "shell":
                             self.assertIsInstance(keyword.value, ast.Constant)
                             self.assertIs(keyword.value.value, False)
+
+    def test_dispatch_modules_have_no_dynamic_resolution_or_os_access(self) -> None:
+        source_root = Path(__file__).resolve().parent.parent
+        allowed_imports = {
+            "collections.abc", "copy", "dataclasses", "types", "core.models",
+            "core.logging", "tools", "tools.base", "tools._support",
+            "tools.registry", "tools.schema",
+        }
+        for name in ("registry", "schema", "executor"):
+            tree = ast.parse((source_root / "tools" / f"{name}.py").read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        self.assertIn(alias.name, allowed_imports)
+                elif isinstance(node, ast.ImportFrom):
+                    self.assertIn(node.module, allowed_imports)
+                elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                    self.assertNotIn(node.func.id, {"getattr", "globals", "locals", "vars", "__import__", "eval", "exec", "compile"})
+
+    def test_registry_bindings_are_explicit_source_references(self) -> None:
+        source_root = Path(__file__).resolve().parent.parent
+        tree = ast.parse((source_root / "tools" / "registry.py").read_text(encoding="utf-8"))
+        assignment = next(node for node in tree.body if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "REGISTRY" for target in node.targets))
+        self.assertIsInstance(assignment.value, ast.Call)
+        bindings = assignment.value.args[0]
+        self.assertIsInstance(bindings, ast.Tuple)
+        self.assertEqual(len(bindings.elts), 16)
+        for binding in bindings.elts:
+            self.assertEqual(binding.func.id, "RegisteredTool")
+            self.assertEqual(len(binding.args), 2)
+            for argument in binding.args:
+                self.assertIsInstance(argument, ast.Attribute)
+                self.assertIsInstance(argument.value, ast.Name)
+                self.assertIn(argument.value.id, {"system_tools", "app_tools", "file_tools", "browser_tools"})
 
     def test_python_311_syntax_compatibility(self) -> None:
         source_root = Path(__file__).resolve().parent.parent

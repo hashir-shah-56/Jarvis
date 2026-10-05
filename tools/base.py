@@ -1,4 +1,4 @@
-"""Provider-independent metadata for direct-call tools and a future registry."""
+"""Provider-independent metadata for deterministic tools and their registry."""
 
 from dataclasses import dataclass
 from typing import Mapping
@@ -10,9 +10,9 @@ from core.models import RiskLevel
 class ToolMetadata:
     """Describe a tool independently of any LLM provider.
 
-    name must be unique in the future registry. arguments_schema describes
-    arguments using JSON Schema; validation and uniqueness enforcement belong
-    to later stages. Stage 2 operations return core.models.ExecutionResult.
+    name is unique in the registry. arguments_schema describes arguments using
+    the JSON Schema subset validated by the Stage 3 executor. Stage 2 operations
+    return core.models.ExecutionResult.
     Metadata alone never authorizes execution.
     """
 

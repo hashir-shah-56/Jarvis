@@ -10,6 +10,9 @@ from tools.base import ToolMetadata
 
 _P = ParamSpec("_P")
 _MESSAGES = {
+    "INVALID_TOOL_NAME": "Provide a nonempty tool name string.",
+    "TOOL_NOT_FOUND": "The requested tool is not registered.",
+    "INVALID_TOOL_ARGUMENTS": "Arguments do not match the tool contract.",
     "INVALID_ARGUMENT": "One or more arguments are invalid.",
     "INVALID_PATH": "Provide an unambiguous local path without parent traversal.",
     "PATH_NOT_FOUND": "The requested path does not exist.",

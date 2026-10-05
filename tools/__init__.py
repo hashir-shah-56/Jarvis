@@ -1,1 +1,1 @@
-"""Direct-call deterministic tools. No registry, dispatcher, or AI access."""
+"""Deterministic tools with an explicit registry/executor; no AI or permissions."""

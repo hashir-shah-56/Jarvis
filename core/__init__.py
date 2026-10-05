@@ -1,6 +1,6 @@
 """Shared infrastructure and the canonical application version."""
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 
 def get_version() -> str:

@@ -5,7 +5,7 @@ assistants such as JARVIS. Its long-term vision is to understand natural-languag
 instructions, plan bounded tasks, use approved tools, maintain memory, and later
 support voice and screen understanding.
 
-**Current version: 0.2.0. Current stage: JARVIS V1 — Stage 2: Deterministic Tools.**
+**Current version: 0.3.0. Current stage: JARVIS V1 — Stage 3: Tool Registry and Standardized Execution.**
 The executable version has one canonical source: `core.__version__` in
 `core/__init__.py`; application code retrieves it using `get_version()`.
 
@@ -22,6 +22,10 @@ The executable version has one canonical source: `core.__version__` in
   decision vocabulary. These models do not execute or authorize actions.
 - Direct-call system, allowlisted application, bounded filesystem, and browser-opening tools.
 - Local path and HTTP(S) URL validation, plus sanitized tool failures with stable error IDs.
+- An explicit registry of all 16 Stage 2 operations, exact-name lookup, and detached
+  JSON-compatible metadata listings.
+- A standardized executor that validates structured arguments before invoking a
+  registered tool and enforces the `ExecutionResult` return boundary.
 - Tests using `unittest`, temporary directories, fixed system measurements, and mocked launches.
 
 The application still starts, reports readiness, and exits. It does not invoke tools.
@@ -32,8 +36,9 @@ There is no interactive assistant loop.
 
 Every public tool operation returns the existing `ExecutionResult`. Corresponding
 `<FUNCTION_NAME>_METADATA` constants live beside each implementation, using the
-existing `ToolMetadata` and `RiskLevel` types. There is no registry or dispatcher.
-These are deterministic primitives invoked directly by controlled Python code/tests.
+existing `ToolMetadata` and `RiskLevel` types. Stage 3 explicitly binds all 16
+operations in `tools/registry.py`. These deterministic primitives remain available
+directly and through the executor to controlled Python code/tests only.
 
 | Module | Operation | Risk | Behavior |
 | --- | --- | --- | --- |
@@ -77,10 +82,81 @@ limit exactly. Returned subsets are sorted, but enumeration order and concurrent
 OS changes can affect which entries fit within a limit. Limits bound traversal
 work, not wall-clock time of an individual OS call.
 
+### Stage 3 registry and execution API
+
+`tools.registry.REGISTRY` is a fixed allowlist created from explicit source-level
+`RegisteredTool(ToolMetadata, callable)` bindings. It does not scan modules or the
+filesystem, load plugins, import caller-supplied paths, or resolve arbitrary Python
+functions. `ToolRegistry` construction rejects duplicate names with the fixed
+`ValueError` identifier `DUPLICATE_TOOL_NAME`; empty/non-string registration names
+and non-callable implementations use `INVALID_TOOL_REGISTRATION`. Construction is
+for trusted Python setup/tests, not an execution request API. There is no runtime
+registration method. Construction invokes no operations.
+
+- `REGISTRY.get(name)` returns a `RegisteredTool` for an exact name, or `None` for
+  unknown/malformed names. Names are case-sensitive and are never trimmed or expanded.
+- `REGISTRY.contains(name)` checks exact membership and returns a boolean.
+- `REGISTRY.list_metadata()` returns detached JSON-compatible dictionaries in
+  registration order, containing `name`, `description`, `risk_level`, and
+  `arguments_schema`, without callables or provider-specific objects.
+- `tools.executor.execute_tool(tool_name, arguments)` accepts only a name and an
+  argument mapping, returning `ExecutionResult`. Use `{}` for zero-argument calls.
+
+The registry snapshots metadata at construction and copies it on retrieval,
+including nested schema dictionaries/lists. Its internal name mapping is read-only;
+editing returned descriptions cannot change subsequent validation. This protects
+the public API, not against trusted Python code deliberately modifying private state.
+
+The executor validates the name, resolves the binding, validates a copied argument
+mapping, invokes only the bound implementation, and verifies that the result is an
+`ExecutionResult`. Existing Stage 2 input validation and `_safe_result` remain intact.
+Underlying success/failure results pass through unchanged. Registry failures,
+unexpected validation/invocation exceptions, and wrong return types produce a
+generic sanitized `TOOL_EXECUTION_FAILED`; no exception text or object representation
+is returned. Invalid request failures are:
+
+| Error ID | Meaning |
+| --- | --- |
+| `INVALID_TOOL_NAME` | Name is not a nonempty string |
+| `TOOL_NOT_FOUND` | No exact registered name matches |
+| `INVALID_TOOL_ARGUMENTS` | Arguments violate the declared tool schema |
+
+`tools/schema.py` implements only the standard-library JSON Schema subset used by
+these tools: `object`, `properties`, `required`, `additionalProperties: false`,
+`string`, `integer`, `minLength`, `maxLength`, `minimum`, `maximum`, `enum`, and
+`default`. Missing required fields, extra/non-string keys, malformed top-level
+payloads, wrong types, and out-of-range values fail before invocation. Values are
+never coerced: `True`, `10.0`, and `"10"` are not integer arguments. Path arguments
+at this boundary must be strings, although direct Stage 2 calls also accept `Path`.
+Unsupported schema features fail closed as an internal execution failure, including
+when attached to an omitted optional argument.
+
+Schema defaults are descriptive annotations. Optional arguments stay omitted so
+the existing Python function supplies its default (including the project-root disk
+path); the executor neither duplicates defaults nor mutates caller mappings. Tests
+verify that every declared schema default matches the implementation signature.
+
+Read-only examples for a controlled Python caller:
+
+```python
+from tools.registry import REGISTRY
+from tools.executor import execute_tool
+
+available = REGISTRY.list_metadata()  # Can be serialized with json.dumps.
+assert REGISTRY.contains("system.get_cpu_info")
+result = execute_tool("system.get_cpu_info", {})
+listing = execute_tool("file.list_directory", {"path": "data", "limit": 10})
+```
+
+Stage 3 is infrastructure only. Risk metadata never grants authorization or causes
+confirmation prompts. There is **no active permission engine and no LLM/API
+integration**; no AI or autonomous controller is connected to this API. Launching
+and modifying tools require the same controlled developer invocation as in Stage 2.
+
 ## Explicitly unimplemented
 
-There is still no LLM/API integration, AI reasoning, tool registry/dispatcher,
-autonomous controller, active permission engine, or autonomous execution. There is
+There is still no LLM/API integration, AI reasoning, autonomous controller,
+active permission engine, or autonomous execution. There is
 no generic shell/PowerShell/CMD execution, `eval`/`exec`, arbitrary executable input,
 file/directory deletion, software-installation tool, shutdown/restart, registry or
 service manipulation, privilege escalation, credential/cookie extraction, messaging,
@@ -99,7 +175,15 @@ Current startup:
 main.py -> configuration -> runtime directories -> logging -> banner -> shutdown
 ```
 
-Current direct tool path:
+Current standardized tool path (orchestrated by `execute_tool`):
+
+```text
+Controlled Python caller -> Tool Registry (exact lookup) -> Schema Validation
+                        -> Standard Executor -> Registered Stage 2 Tool
+                        -> existing input checks/operation -> ExecutionResult
+```
+
+Existing direct tool path remains available to controlled Python callers:
 
 ```text
 Controlled Python caller -> specific tool -> input checks -> bounded operation
@@ -123,17 +207,20 @@ the LLM must resolve approved tools, enforce permission decisions, validate inpu
 and execute only authorized actions. An LLM must never receive unrestricted OS
 access or an unrestricted PowerShell execution path.
 
-`ToolMetadata` describes a unique name, description, `RiskLevel`, and argument schema
-(intended as JSON Schema). Registry uniqueness and schema validation are future
-work. `ExecutionResult` contains `success`, a human-readable `message`, optional
+`ToolMetadata` describes a unique name, description, `RiskLevel`, and argument schema.
+Stage 3 enforces registry uniqueness and the supported schema subset at dispatch.
+Metadata itself has no execution or authorization behavior. `RegisteredTool` binds
+metadata to an implementation separately. `ExecutionResult` contains `success`, a human-readable `message`, optional
 structured `data`, and optional `error_id`. Models use type hints; they are not
 runtime security validators. Data/schema mappings should hold JSON-compatible
 values; frozen dataclasses do not make nested mappings immutable.
 
 ## Security and permissions
 
-Stage 2 implements input validation in `security/validator.py`. The policy module
-still documents future requirements; no authorization decisions are enforced.
+Stage 2 implements input validation in `security/validator.py`; Stage 3 adds schema
+validation before dispatch. The policy module still documents future requirements;
+no authorization decisions are enforced. The registry is an allowlist/resolver,
+not a permission engine. Stage 4 remains next.
 
 Current input safeguards and limits:
 
@@ -196,7 +283,9 @@ controller must enforce permission decisions, independently of the LLM.
 
 Application logs are not security audit logs. Startup logs fixed lifecycle/error
 messages; tools log only their operation name and completion/error identifier at
-DEBUG level. They never log paths, URLs, search queries, file contents, process names,
+DEBUG level. The executor logs only fixed completion/rejection events and stable
+dispatcher error IDs, never caller-provided tool names or underlying result data.
+They never log paths, URLs, search queries, file contents, process names,
 environment dumps, or raw exception details. The JSON formatter omits
 exception tracebacks and arbitrary record extras. It does not redact secrets from
 message text: future callers must sanitize messages and result data before logging
@@ -240,6 +329,9 @@ Jarvis/
 |   |-- __init__.py
 |   |-- base.py           # ToolMetadata
 |   |-- _support.py       # Error/metadata helpers, no dispatcher
+|   |-- registry.py       # Explicit 16-tool allowlist and detached descriptions
+|   |-- schema.py         # Contract validation; defaults left to Python
+|   |-- executor.py       # Standardized ExecutionResult boundary, no permissions
 |   |-- system_tools.py
 |   |-- app_tools.py
 |   |-- file_tools.py
@@ -262,7 +354,9 @@ Jarvis/
     |-- test_app_tools.py
     |-- test_file_tools.py
     |-- test_browser_tools.py
-    `-- test_tool_contracts.py
+    |-- test_tool_contracts.py
+    |-- test_tool_registry.py
+    `-- test_tool_executor.py
 ```
 
 ## Setup and running (Windows PowerShell)
@@ -276,7 +370,8 @@ utilization, physical memory, and process measurements (also used for disk usage
 This replaces the need for shell commands or custom native bindings for those
 measurements. See the [psutil documentation](https://psutil.readthedocs.io/stable/)
 and [pinned release](https://pypi.org/project/psutil/7.2.2/). No Playwright, LLM SDK,
-voice package, GUI framework, or Windows automation dependency is added.
+voice package, GUI framework, or Windows automation dependency is added. Stage 3
+adds no dependencies; registry, schema validation, and execution use the standard library.
 
 Open the repository folder in VS Code and open its PowerShell terminal. For a fresh
 checkout, create a virtual environment; reuse an existing `.venv` if already present:
@@ -336,7 +431,7 @@ $env:JARVIS_LOG_DIR = "logs"
 .\.venv\Scripts\python.exe main.py
 ```
 
-No secret settings are needed in Stage 2. Future secrets must come from environment
+No secret settings are needed in Stage 3. Future secrets must come from environment
 variables. `.env` files are ignored by Git; `.env.example` is retained. Default
 runtime content is ignored; custom runtime locations within the repository need
 their own ignore entries before committing.
@@ -361,6 +456,16 @@ system measurements are mocked where machine values would make assertions unstab
 Tests do not launch real apps, execute commands, access external services, or require
 API keys/admin privileges. The optional real-symlink test skips if Windows does not
 allow unprivileged symlink creation; reparse simulation tests always run.
+
+Stage 3 tests cover all 16 exact bindings, duplicate rejection, deterministic JSON
+metadata, defensive copies, schema/signature default consistency, valid and omitted
+arguments, all declared type/length/numeric/enum bounds, boolean rejection, missing
+and extra arguments, malformed payloads, and unchanged caller mappings. They also
+cover non-invocation on rejection, correct argument forwarding, result identity,
+sanitized internal failures and wrong return types, sanitized logs, descriptive-only
+risk levels, and continued Stage 2 validation. Source checks prohibit dynamic
+resolution/OS access in the new dispatcher modules, verify explicit bindings, and
+include all new production modules in Python 3.11 syntax checks.
 
 Future modules can use `core.logging.get_logger("component")` after the entry point
 initializes logging. Importing modules does not initialize directories, logs, or tools.
@@ -398,8 +503,9 @@ print(search_web("Python pathlib documentation"))
 print(open_project_in_vscode("."))
 ```
 
-For direct primitive use, import functions from their specific modules; there is
-no text-command endpoint or generic execution API. Inspect `result.success`,
+For direct primitive use, import functions from their specific modules. Stage 3
+also provides `execute_tool` for schema-checked structured calls; there is still no
+text-command or natural-language endpoint. Inspect `result.success`,
 `result.message`, `result.data`, and `result.error_id` rather than parsing log text.
 
 ## V1 development roadmap
@@ -408,8 +514,8 @@ no text-command endpoint or generic execution API. Inspect `result.success`,
 | --- | --- | --- |
 | 1 | Foundation, configuration, logging, models, tests | Implemented |
 | 2 | Windows/system/application/file/browser tool implementations | Implemented |
-| 3 | Tool registry and standardized execution | Planned |
-| 4 | Permission and security engine | Planned |
+| 3 | Tool registry and standardized execution | Implemented |
+| 4 | Permission and security engine | Next — not implemented |
 | 5 | LLM provider integration and structured tool calling | Planned |
 | 6 | Planner/controller and bounded multi-step execution | Planned |
 | 7 | SQLite memory | Planned |
@@ -419,13 +525,28 @@ no text-command endpoint or generic execution API. Inspect `result.success`,
 
 Stages 2–3 must not expose tools to an LLM or autonomous controller before the
 permission/security boundaries are implemented. Each stage requires its own scope
-and approval. Stage 2 stops at direct-call primitives; Stage 3 has not started.
+and approval. Stage 3 is complete and stops at controlled structured execution;
+Stage 4 permission/security enforcement remains the next stage.
 
 Future versions may add speech-to-text, text-to-speech, a wake word, screen
 understanding, deeper Windows integration, local AI, reusable workflows, and
 carefully bounded autonomous tasks.
 
 ## Changelog
+
+### 0.3.0 — 2026-10-05
+
+- Explicitly registered all 16 existing Stage 2 operations with duplicate rejection.
+- Added exact-name lookup, membership checks, and detached JSON-compatible metadata.
+- Added standard-library schema validation without coercion or caller mutation;
+  omitted optional arguments retain existing Python defaults.
+- Added `execute_tool` with sanitized failures and defensive `ExecutionResult` checking.
+- Added `INVALID_TOOL_NAME`, `TOOL_NOT_FOUND`, and `INVALID_TOOL_ARGUMENTS` request
+  error IDs; unexpected failures reuse `TOOL_EXECUTION_FAILED`.
+- Added registry/executor tests, source-level resolution checks, and default consistency checks.
+- Preserved Stage 1/2 safeguards, tool implementations, and regression tests.
+- Updated current architecture, API documentation, structure, and roadmap; added no dependencies.
+- Kept authorization/confirmation, LLM/API integration, and autonomous execution unimplemented.
 
 ### 0.2.0 — 2026-10-02
 
