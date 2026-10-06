@@ -1,1 +1,1 @@
-"""Deterministic tools with an explicit registry/executor; no AI or permissions."""
+"""Deterministic primitives; supported execution enters the security gateway."""

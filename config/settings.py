@@ -1,13 +1,16 @@
-"""Load non-secret Stage 1 settings without import-time side effects."""
+"""Explicit environment configuration; startup and optional AI settings are separate."""
 
 import os
+import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 ENVIRONMENTS = frozenset({"development", "testing", "production"})
+DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+DEFAULT_AI_TIMEOUT_SECONDS = 30
 
 
 class ConfigurationError(ValueError):
@@ -22,6 +25,30 @@ class Settings:
     log_level: str
     data_dir: Path
     log_dir: Path
+
+
+@dataclass(frozen=True)
+class GeminiSettings:
+    api_key: str = field(repr=False)
+    model: str
+    timeout_seconds: int
+
+
+def load_gemini_settings(environ: Mapping[str, str] | None = None) -> GeminiSettings:
+    """Explicit opt-in loading, independent of safe, quota-free startup."""
+    values = os.environ if environ is None else environ
+    key = values.get("GEMINI_API_KEY", "")
+    model = values.get("JARVIS_GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
+    timeout = values.get("JARVIS_AI_TIMEOUT_SECONDS", str(DEFAULT_AI_TIMEOUT_SECONDS))
+    if type(key) is not str or not key.strip():
+        raise ConfigurationError("AI_NOT_CONFIGURED")
+    if key != key.strip() or any(char.isspace() or ord(char) < 32 for char in key):
+        raise ConfigurationError("AI_INVALID_CONFIGURATION")
+    if type(model) is not str or not re.fullmatch(r"gemini-[A-Za-z0-9][A-Za-z0-9._-]{0,119}", model):
+        raise ConfigurationError("AI_INVALID_CONFIGURATION")
+    if type(timeout) is not str or not re.fullmatch(r"[0-9]{1,3}", timeout) or not 1 <= int(timeout) <= 120:
+        raise ConfigurationError("AI_INVALID_CONFIGURATION")
+    return GeminiSettings(key, model, int(timeout))
 
 
 def load_settings(

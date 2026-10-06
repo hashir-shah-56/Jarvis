@@ -10,6 +10,12 @@ from tools.base import ToolMetadata
 
 _P = ParamSpec("_P")
 _MESSAGES = {
+    "PERMISSION_DENIED": "The action is not permitted by security policy.",
+    "CONFIRMATION_REQUIRED": "Trusted user confirmation is required.",
+    "CONFIRMATION_NOT_FOUND": "The confirmation is not available.",
+    "CONFIRMATION_EXPIRED": "The confirmation has expired; request the action again.",
+    "CONFIRMATION_UNAVAILABLE": "A confirmation cannot be created; try again later.",
+    "SECURITY_AUDIT_FAILED": "Security audit recording failed; check action state before retrying.",
     "INVALID_TOOL_NAME": "Provide a nonempty tool name string.",
     "TOOL_NOT_FOUND": "The requested tool is not registered.",
     "INVALID_TOOL_ARGUMENTS": "Arguments do not match the tool contract.",

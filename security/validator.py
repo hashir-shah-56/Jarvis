@@ -1,7 +1,7 @@
-"""Stage 2 input checks, not a sandbox or an active permission engine.
+"""Stage 2 input checks, separate from Stage 4 authorization and not a sandbox.
 
 Checks cannot eliminate races with concurrent filesystem changes. Call tools only
-on trusted local trees. Stage 4 must establish authorization and stronger boundaries.
+on trusted local trees. Stage 4 authorization does not eliminate these races.
 """
 
 import ctypes

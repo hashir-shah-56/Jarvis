@@ -11,7 +11,8 @@ from unittest.mock import Mock, patch
 
 from config.settings import PROJECT_ROOT
 from core.models import ExecutionResult, RiskLevel
-from tools import executor
+from security import gateway
+from tools import _execution, executor
 from tools.registry import REGISTRY, RegisteredTool, ToolRegistry
 
 
@@ -25,9 +26,18 @@ class ToolExecutorTests(unittest.TestCase):
             operation = Mock(return_value=self.result)
             self.operations[tool.metadata.name] = operation
             entries.append(RegisteredTool(tool.metadata, operation))
-        self.registry_patch = patch.object(executor, "REGISTRY", ToolRegistry(entries))
+        self.gateway = gateway.SecurityGateway(registry=ToolRegistry(entries))
+        self.registry_patch = patch.object(gateway, "_DEFAULT_GATEWAY", self.gateway)
         self.registry_patch.start()
         self.addCleanup(self.registry_patch.stop)
+
+    def execute_with_confirmation(self, name, arguments):
+        """Stage 3 dispatch assertions now cross the required Stage 4 gate."""
+        result = executor.execute_tool(name, arguments)
+        if result.error_id == "CONFIRMATION_REQUIRED":
+            self.operations[name].assert_not_called()
+            return gateway.confirm_execution(result.data["confirmation_id"])
+        return result
 
     def assert_rejected(self, name, arguments, error_id="INVALID_TOOL_ARGUMENTS") -> None:
         result = executor.execute_tool(name, arguments)
@@ -63,7 +73,7 @@ class ToolExecutorTests(unittest.TestCase):
             with self.subTest(name=name):
                 for operation in self.operations.values():
                     operation.reset_mock()
-                self.assertIs(executor.execute_tool(name, arguments), self.result)
+                self.assertIs(self.execute_with_confirmation(name, arguments), self.result)
                 self.operations[name].assert_called_once_with(**arguments)
                 for other, operation in self.operations.items():
                     if other != name:
@@ -118,7 +128,7 @@ class ToolExecutorTests(unittest.TestCase):
                         edge, invalid = "x" * edge, "x" * invalid
                     with self.subTest(tool=item["name"], key=key, bound=bound):
                         self.assert_rejected(item["name"], {**required, key: invalid})
-                        self.assertIs(executor.execute_tool(item["name"], {**required, key: edge}), self.result)
+                        self.assertIs(self.execute_with_confirmation(item["name"], {**required, key: edge}), self.result)
                         self.operations[item["name"]].reset_mock()
 
     def test_application_enum_is_exact(self) -> None:
@@ -143,7 +153,7 @@ class ToolExecutorTests(unittest.TestCase):
         self.assertEqual(invalid, {"limit": "10"})
 
     def test_invalid_names_do_not_invoke_registry(self) -> None:
-        with patch.object(executor, "REGISTRY") as registry:
+        with patch.object(self.gateway, "_registry") as registry:
             for name in (None, "", [], {}, 4, True, lambda: None):
                 self.assert_rejected(name, {}, "INVALID_TOOL_NAME")
             registry.get.assert_not_called()
@@ -163,10 +173,10 @@ class ToolExecutorTests(unittest.TestCase):
         self.assertEqual(result, ExecutionResult(False, "The operation could not be completed.", error_id="TOOL_EXECUTION_FAILED"))
 
     def test_lookup_and_validator_exceptions_are_sanitized(self) -> None:
-        with patch.object(executor, "REGISTRY") as registry:
+        with patch.object(self.gateway, "_registry") as registry:
             registry.get.side_effect = RuntimeError("private-registry-detail")
             self.assert_rejected("system.get_cpu_info", {}, "TOOL_EXECUTION_FAILED")
-        with patch.object(executor, "validate_arguments", side_effect=RuntimeError("private-validator-detail")):
+        with patch.object(_execution, "validate_arguments", side_effect=RuntimeError("private-validator-detail")):
             self.assert_rejected("system.get_cpu_info", {}, "TOOL_EXECUTION_FAILED")
 
     def test_non_result_returns_are_rejected_without_representation(self) -> None:
@@ -186,16 +196,21 @@ class ToolExecutorTests(unittest.TestCase):
         tool = REGISTRY.get("system.list_processes")
         tool.metadata.arguments_schema["properties"]["limit"]["multipleOf"] = 2
         registry = ToolRegistry((RegisteredTool(tool.metadata, self.operations[tool.metadata.name]),))
-        with patch.object(executor, "REGISTRY", registry):
+        with patch.object(self.gateway, "_registry", registry):
             self.assert_rejected(tool.metadata.name, {}, "TOOL_EXECUTION_FAILED")
 
-    def test_risk_metadata_does_not_authorize_or_prompt(self) -> None:
+    def test_risk_metadata_now_requires_confirmation_for_medium_and_high(self) -> None:
         tool = REGISTRY.get("system.get_cpu_info")
         for risk in RiskLevel:
             operation = Mock(return_value=self.result)
             registry = ToolRegistry((RegisteredTool(replace(tool.metadata, risk_level=risk), operation),))
-            with patch.object(executor, "REGISTRY", registry):
-                self.assertIs(executor.execute_tool(tool.metadata.name, {}), self.result)
+            with patch.object(self.gateway, "_registry", registry):
+                result = executor.execute_tool(tool.metadata.name, {})
+                if risk in (RiskLevel.MEDIUM, RiskLevel.HIGH):
+                    self.assertEqual(result.error_id, "CONFIRMATION_REQUIRED")
+                    operation.assert_not_called()
+                    result = gateway.confirm_execution(result.data["confirmation_id"])
+                self.assertIs(result, self.result)
                 operation.assert_called_once_with()
 
     def test_logs_do_not_include_requests_or_internal_failures(self) -> None:
@@ -215,7 +230,7 @@ class ToolExecutorTests(unittest.TestCase):
         self.assertIn("execution completed", output)
 
     def test_logging_failure_is_sanitized(self) -> None:
-        with patch.object(executor, "get_logger", side_effect=RuntimeError("private-log-path")):
+        with patch.object(_execution, "get_logger", side_effect=RuntimeError("private-log-path")):
             self.assert_rejected("unknown", {}, "TOOL_EXECUTION_FAILED")
 
 

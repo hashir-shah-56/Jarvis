@@ -61,7 +61,7 @@ class ToolContractTests(unittest.TestCase):
 
     def test_no_shell_or_dynamic_code_execution_in_tool_source(self) -> None:
         source_root = Path(__file__).resolve().parent.parent
-        for folder in ("tools", "security"):
+        for folder in ("tools", "security", "ai", "agent"):
             for file in (source_root / folder).glob("*.py"):
                 tree = ast.parse(file.read_text(encoding="utf-8"))
                 for node in ast.walk(tree):
@@ -85,8 +85,9 @@ class ToolContractTests(unittest.TestCase):
             "collections.abc", "copy", "dataclasses", "types", "core.models",
             "core.logging", "tools", "tools.base", "tools._support",
             "tools.registry", "tools.schema",
+            "json", "security.gateway",
         }
-        for name in ("registry", "schema", "executor"):
+        for name in ("registry", "schema", "executor", "_execution"):
             tree = ast.parse((source_root / "tools" / f"{name}.py").read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
@@ -113,8 +114,54 @@ class ToolContractTests(unittest.TestCase):
                 self.assertIsInstance(argument.value, ast.Name)
                 self.assertIn(argument.value.id, {"system_tools", "app_tools", "file_tools", "browser_tools"})
 
+    def test_security_modules_have_no_dynamic_code_or_command_imports(self) -> None:
+        source_root = Path(__file__).resolve().parent.parent
+        allowed = {
+            "math", "re", "secrets", "time", "collections.abc", "dataclasses",
+            "threading", "json", "collections", "datetime", "enum", "pathlib",
+            "agent.permissions", "core.models", "security.audit",
+            "security.permissions", "security.policies", "tools._execution",
+            "tools._support", "tools.registry", "tools.base", "tools.schema",
+        }
+        for name in ("gateway", "permissions", "policies", "audit"):
+            tree = ast.parse((source_root / "security" / f"{name}.py").read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        self.assertIn(alias.name, allowed)
+                elif isinstance(node, ast.ImportFrom):
+                    self.assertIn(node.module, allowed)
+                elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                    self.assertNotIn(node.func.id, {"getattr", "globals", "locals", "vars", "__import__", "eval", "exec", "compile"})
+
+    def test_public_executor_only_delegates_to_security_gateway(self) -> None:
+        source_root = Path(__file__).resolve().parent.parent
+        tree = ast.parse((source_root / "tools" / "executor.py").read_text(encoding="utf-8"))
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].func.id, "request_execution")
+
     def test_python_311_syntax_compatibility(self) -> None:
         source_root = Path(__file__).resolve().parent.parent
-        for folder in ("tools", "security", "config", "core"):
+        ast.parse((source_root / "main.py").read_text(encoding="utf-8"), feature_version=(3, 11))
+        for folder in ("tools", "security", "config", "core", "agent", "memory", "ai"):
             for file in (source_root / folder).glob("*.py"):
                 ast.parse(file.read_text(encoding="utf-8"), feature_version=(3, 11))
+
+    def test_ai_adapter_cannot_invoke_tools_or_confirmations(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        forbidden = {"execute_tool", "request_execution", "_invoke_tool", "confirm_execution", "reject_confirmation"}
+        for file in (root / "ai").glob("*.py"):
+            tree = ast.parse(file.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    self.assertNotIn(node.module, {"security.gateway", "tools._execution", "tools.executor"})
+                if isinstance(node, ast.Call):
+                    name = node.func.id if isinstance(node.func, ast.Name) else node.func.attr if isinstance(node.func, ast.Attribute) else ""
+                    self.assertNotIn(name, forbidden)
+        brain = ast.parse((root / "agent" / "brain.py").read_text(encoding="utf-8"))
+        calls = [node for node in ast.walk(brain) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "request_execution"]
+        self.assertEqual(len(calls), 1)
+        self.assertFalse(any(isinstance(node, (ast.For, ast.While)) for node in ast.walk(brain)))
+        for file in (root / "agent").glob("*.py"):
+            self.assertNotIn("google.genai", file.read_text(encoding="utf-8"))
