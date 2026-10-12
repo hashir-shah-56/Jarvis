@@ -7,7 +7,7 @@ from dataclasses import FrozenInstanceError, replace
 from unittest.mock import Mock
 
 from core.models import ExecutionResult
-from tools import app_tools, browser_tools, file_tools, system_tools
+from tools import app_tools, browser_tools, file_tools, memory_tools, system_tools
 from tools.registry import REGISTRY, RegisteredTool, ToolRegistry
 
 
@@ -28,14 +28,20 @@ EXPECTED = {
     "file.move_path": (file_tools.MOVE_PATH_METADATA, file_tools.move_path),
     "browser.open_url": (browser_tools.OPEN_URL_METADATA, browser_tools.open_url),
     "browser.search_web": (browser_tools.SEARCH_WEB_METADATA, browser_tools.search_web),
+    "memory.list": (memory_tools.LIST_METADATA, memory_tools.list),
+    "memory.get": (memory_tools.GET_METADATA, memory_tools.get),
+    "memory.search": (memory_tools.SEARCH_METADATA, memory_tools.search),
+    "memory.create": (memory_tools.CREATE_METADATA, memory_tools.create),
+    "memory.update": (memory_tools.UPDATE_METADATA, memory_tools.update),
+    "memory.delete": (memory_tools.DELETE_METADATA, memory_tools.delete),
 }
 
 
 class ToolRegistryTests(unittest.TestCase):
-    def test_exactly_16_unique_tools_in_deterministic_order(self) -> None:
+    def test_exactly_22_unique_tools_in_deterministic_order(self) -> None:
         names = [item["name"] for item in REGISTRY.list_metadata()]
-        self.assertEqual(len(names), 16)
-        self.assertEqual(len(set(names)), 16)
+        self.assertEqual(len(names), 22)
+        self.assertEqual(len(set(names)), 22)
         self.assertEqual(names, list(EXPECTED))
         self.assertEqual(REGISTRY.list_metadata(), REGISTRY.list_metadata())
 

@@ -61,7 +61,7 @@ class ToolContractTests(unittest.TestCase):
 
     def test_no_shell_or_dynamic_code_execution_in_tool_source(self) -> None:
         source_root = Path(__file__).resolve().parent.parent
-        for folder in ("tools", "security", "ai", "agent"):
+        for folder in ("tools", "security", "ai", "agent", "interface", "memory"):
             for file in (source_root / folder).glob("*.py"):
                 tree = ast.parse(file.read_text(encoding="utf-8"))
                 for node in ast.walk(tree):
@@ -105,14 +105,14 @@ class ToolContractTests(unittest.TestCase):
         self.assertIsInstance(assignment.value, ast.Call)
         bindings = assignment.value.args[0]
         self.assertIsInstance(bindings, ast.Tuple)
-        self.assertEqual(len(bindings.elts), 16)
+        self.assertEqual(len(bindings.elts), 22)
         for binding in bindings.elts:
             self.assertEqual(binding.func.id, "RegisteredTool")
             self.assertEqual(len(binding.args), 2)
             for argument in binding.args:
                 self.assertIsInstance(argument, ast.Attribute)
                 self.assertIsInstance(argument.value, ast.Name)
-                self.assertIn(argument.value.id, {"system_tools", "app_tools", "file_tools", "browser_tools"})
+                self.assertIn(argument.value.id, {"system_tools", "app_tools", "file_tools", "browser_tools", "memory_tools"})
 
     def test_security_modules_have_no_dynamic_code_or_command_imports(self) -> None:
         source_root = Path(__file__).resolve().parent.parent
@@ -144,7 +144,7 @@ class ToolContractTests(unittest.TestCase):
     def test_python_311_syntax_compatibility(self) -> None:
         source_root = Path(__file__).resolve().parent.parent
         ast.parse((source_root / "main.py").read_text(encoding="utf-8"), feature_version=(3, 11))
-        for folder in ("tools", "security", "config", "core", "agent", "memory", "ai"):
+        for folder in ("tools", "security", "config", "core", "agent", "memory", "ai", "interface"):
             for file in (source_root / folder).glob("*.py"):
                 ast.parse(file.read_text(encoding="utf-8"), feature_version=(3, 11))
 
@@ -165,3 +165,9 @@ class ToolContractTests(unittest.TestCase):
         self.assertFalse(any(isinstance(node, (ast.For, ast.While)) for node in ast.walk(brain)))
         for file in (root / "agent").glob("*.py"):
             self.assertNotIn("google.genai", file.read_text(encoding="utf-8"))
+            tree = ast.parse(file.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    self.assertNotIn(node.module, {"tools._execution", "tools.system_tools", "tools.file_tools", "tools.app_tools", "tools.browser_tools"})
+                if isinstance(node, ast.Attribute):
+                    self.assertNotIn(node.attr, {"_invoke_tool", "implementation"})

@@ -340,7 +340,7 @@ class GatewayTests(unittest.TestCase):
         self.operations["file.rename_path"].assert_not_called()
 
     def test_confirmation_is_not_a_registered_tool(self) -> None:
-        self.assertEqual(len(REGISTRY.list_metadata()), 16)
+        self.assertEqual(len(REGISTRY.list_metadata()), 22)
         for name in ("confirm_execution", "security.confirm_execution", "reject_confirmation", "security.reject_confirmation"):
             self.assertFalse(REGISTRY.contains(name))
             self.assertEqual(self.gateway.request_execution(name, {}).error_id, "TOOL_NOT_FOUND")

@@ -51,7 +51,7 @@ class ToolExecutorTests(unittest.TestCase):
     def test_only_name_and_argument_mapping_are_execution_inputs(self) -> None:
         self.assertEqual(list(inspect.signature(executor.execute_tool).parameters), ["tool_name", "arguments"])
 
-    def test_valid_calls_dispatch_to_each_of_the_16_bound_operations(self) -> None:
+    def test_valid_calls_dispatch_to_each_of_the_22_bound_operations(self) -> None:
         cases = {
             "system.get_system_info": {}, "system.get_cpu_info": {},
             "system.get_cpu_usage": {}, "system.get_memory_info": {},
@@ -67,6 +67,12 @@ class ToolExecutorTests(unittest.TestCase):
             "file.move_path": {"source": "old", "destination": "new"},
             "browser.open_url": {"url": "https://example.com"},
             "browser.search_web": {"query": "example query"},
+            "memory.list": {},
+            "memory.get": {"memory_id": "m" * 22},
+            "memory.search": {"query": "concise"},
+            "memory.create": {"content": "Concise", "category": "preference"},
+            "memory.update": {"memory_id": "m" * 22, "expected_updated_at": "2026-10-08T00:00:00Z", "content": "Detailed", "category": "preference"},
+            "memory.delete": {"memory_id": "m" * 22, "expected_updated_at": "2026-10-08T00:00:00Z", "expected_content": "Concise", "category": "preference"},
         }
         self.assertEqual(set(cases), set(self.operations))
         for name, arguments in cases.items():
@@ -117,7 +123,7 @@ class ToolExecutorTests(unittest.TestCase):
     def test_all_declared_string_and_integer_bounds(self) -> None:
         for item in REGISTRY.list_metadata():
             schema = item["arguments_schema"]
-            required = {key: definition.get("enum", ["x"])[0] for key, definition in schema["properties"].items() if key in schema["required"]}
+            required = {key: definition.get("enum", ["x" * max(1, definition.get("minLength", 1))])[0] for key, definition in schema["properties"].items() if key in schema["required"]}
             for key, definition in schema["properties"].items():
                 for bound, delta in (("minLength", -1), ("maxLength", 1), ("minimum", -1), ("maximum", 1)):
                     if bound not in definition:

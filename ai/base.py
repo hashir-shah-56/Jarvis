@@ -14,3 +14,15 @@ class ProviderTurn(Protocol):
 
 class Provider(Protocol):
     def turn(self, user_text: str) -> AbstractContextManager[ProviderTurn]: ...
+
+
+class TaskSession(Protocol):
+    """One proposal at a time; feedback contains sanitized successful results only."""
+
+    def propose(self) -> ProviderResponse: ...
+
+    def advance(self, feedback: list[dict[str, object]]) -> ProviderResponse: ...
+
+
+class TaskProvider(Protocol):
+    def task(self, user_text: str) -> AbstractContextManager[TaskSession]: ...

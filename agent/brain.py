@@ -1,4 +1,4 @@
-"""One user turn, at most one action, and no autonomous planning or retries."""
+"""High-level bounded task API, plus the retained Stage 5 single-action API."""
 
 from ai.base import Provider
 from ai.models import (
@@ -9,6 +9,7 @@ from ai.sanitize import sanitize_result
 from ai.validation import validate_response
 from core.logging import get_logger
 from security import gateway
+from agent.controller import Controller
 
 
 def _event(name: str) -> None:
@@ -29,8 +30,21 @@ def _failure(error_id: str, tool_succeeded=None) -> TurnResult:
 class Brain:
     def __init__(self, provider: Provider):
         self._provider = provider
+        self._controller = Controller(provider)
 
-    def run_turn(self, user_text: str) -> TurnResult:
+    def run_turn(self, user_text: str):
+        return self._controller.run_turn(user_text)
+
+    def confirm_turn(self, turn_id: str):
+        return self._controller.confirm_turn(turn_id)
+
+    def reject_turn(self, turn_id: str):
+        return self._controller.reject_turn(turn_id)
+
+    def close(self):
+        self._controller.close()
+
+    def run_single_turn(self, user_text: str) -> TurnResult:
         if type(user_text) is not str or not user_text.strip() or len(user_text) > MAX_TEXT_CHARS:
             return _failure("AI_INVALID_INPUT")
         tool_succeeded = None

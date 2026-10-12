@@ -5,7 +5,8 @@ assistants such as JARVIS. Its long-term vision is to understand natural-languag
 instructions, plan bounded tasks, use approved tools, maintain memory, and later
 support voice and screen understanding.
 
-**Current version: 0.5.0. Current stage: JARVIS V1 — Stage 5: Gemini / LLM Provider Integration.**
+**Current version: 0.6.1. Current stage: JARVIS V1 — Stage 6: Bounded Planner & Controller.**
+Stage 7 SQLite memory is implemented in the working tree, pending release verification.
 The executable version has one canonical source: `core.__version__` in
 `core/__init__.py`; application code retrieves it using `get_version()`.
 
@@ -18,12 +19,12 @@ The executable version has one canonical source: `core.__version__` in
 - Safe creation of missing runtime directories; existing contents are preserved.
 - Reusable JSON-line console and UTF-8 file logging with UTC timestamps, severity,
   component name, and message. Files are appended to, never truncated by startup.
-- Startup banner, immediate clean shutdown, and sanitized top-level error reporting.
+- Quota-free startup, a development text CLI, and sanitized top-level error reporting.
 - Provider-independent tool metadata, risk levels, execution results, and permission
   decision vocabulary. These models do not execute or authorize actions.
 - Direct-call system, allowlisted application, bounded filesystem, and browser-opening tools.
 - Local path and HTTP(S) URL validation, plus sanitized tool failures with stable error IDs.
-- An explicit registry of all 16 Stage 2 operations, exact-name lookup, and detached
+- An explicit registry of 16 Stage 2 operations plus six Stage 7 memory operations, exact-name lookup, and detached
   JSON-compatible metadata listings.
 - A standardized executor that validates structured arguments before invoking a
   registered tool and enforces the `ExecutionResult` return boundary.
@@ -31,26 +32,33 @@ The executable version has one canonical source: `core.__version__` in
   expiring, single-use, exact-action confirmations for MEDIUM/HIGH operations.
 - Sanitized security audit events separate from ordinary application/debug logs.
 - A provider-independent AI boundary (`ai/`) with Gemini as the first provider.
-  The model may answer conversationally or propose one registered tool call per turn.
+  The model may answer conversationally or propose one registered tool call per response.
   All proposals are treated as untrusted input and must pass through Stage 4.
 - Gemini integrated using the official `google-genai` SDK (`google-genai==2.28.0`).
   API credentials come only from the `GEMINI_API_KEY` environment variable.
   Manual structured function calling only; SDK automatic execution is disabled.
-  All 16 tool declarations derive from `REGISTRY.list_metadata()` — no second list.
+  All 22 tool declarations derive from `REGISTRY.list_metadata()` — no second list.
   Confirmation APIs (`confirm_execution`, `reject_confirmation`) are never exposed.
 - Bounded tool-result sanitization: only JSON-compatible data from successful
   executions crosses the provider boundary; sensitive field names are stripped;
   a node/depth/item/byte budget prevents oversized provider inputs.
 - Provider errors fail with stable identifiers; no API key, raw stack traces, or
-  internal HTTP details are logged or returned.
-- At most one model-proposed tool action is accepted per user turn. Multiple
-  proposals execute none (`AI_MULTIPLE_TOOL_CALLS`). Confirmation IDs never enter
-  Gemini context; the brain returns them only in separate `TrustedConfirmation` state.
+  raw HTTP payloads are logged or returned. Opt-in development diagnostics expose
+  only allowlisted exception categories, status codes, phases, and fixed reasons.
+- An iterative controller bounds each task to 5 actions and 8 provider calls,
+  detects identical repeated actions, and independently gates every action.
+- Confirmation pauses the task; only trusted CLI approval resumes it. Rejection,
+  expiry, denial, and failures terminate without automatic retries.
+- Multiple proposals in one response execute none (`AI_MULTIPLE_TOOL_CALLS`).
+  Confirmation IDs never enter Gemini context or CLI output.
 - Tests using `unittest`, temporary directories, fixed system measurements, and mocked launches.
+- Opt-in SQLite memory with explicit bounded retrieval and exact-action confirmation
+  for every create/update/delete; no automatic storage or prompt injection.
 
-The application still starts, reports readiness, and exits. It does not invoke tools.
-There is no interactive assistant loop.
-`Status: Ready` means the foundation initialized successfully.
+In development mode, startup opens a text-only interactive CLI. Testing/production
+mode still initializes and exits. Startup makes no provider request and invokes no
+tool. `Status: Ready` means the foundation initialized successfully, not that API
+credentials were verified remotely.
 
 ### Stage 2 tools
 
@@ -193,9 +201,9 @@ Policy is immutable and deny-only: there are no risk-downgrade environment setti
 For MEDIUM/HIGH, a request returns `success=False`, `error_id="CONFIRMATION_REQUIRED"`,
 and `data` containing `confirmation_id`, `tool_name`, trusted `description`,
 `risk_level`, and `expires_in_seconds=300`. The description is deliberately only
-tool-level; it does not describe the target path or expose raw arguments. A future
-UI must securely associate its user review with the exact original request; this
-description alone is not a complete target-aware confirmation dialog.
+tool-level; it does not describe the target path or expose raw arguments. Stage 6
+retains a separate snapshot of schema-validated arguments for CLI review, showing
+the exact target alongside this description before asking for approval.
 
 Two separate trusted interface methods complete this flow:
 
@@ -208,7 +216,8 @@ Two separate trusted interface methods complete this flow:
 These APIs are **not registered tools and must never be exposed to an LLM**. The
 future model may request an action; it may never authorize its own action. Stage 4
 has no GUI confirmation dialog or user authentication: confirmation is currently a
-programmatic boundary reserved for trusted interface/controller infrastructure.
+programmatic boundary reserved for trusted interface/controller infrastructure;
+the Stage 6 CLI calls it only after explicit terminal approval.
 Receiving an ID in a model response must not cause automatic confirmation.
 
 Pending requests are private to one gateway/process. Each stores the resolved tool
@@ -296,8 +305,8 @@ not have cross-process locking; trusted setup must manage their storage/lifecycl
 
 ## Explicitly unimplemented
 
-There is no autonomous controller, multi-step planner, GUI confirmation dialog,
-persistent memory or database, desktop UI, or packaging. There is
+There is no unrestricted autonomous agent, GUI confirmation dialog,
+desktop UI, or packaging. There is
 no generic shell/PowerShell/CMD execution, `eval`/`exec`, arbitrary executable input,
 file/directory deletion, software-installation tool, shutdown/restart, registry or
 service manipulation, privilege escalation, credential/cookie extraction, messaging,
@@ -305,29 +314,221 @@ financial action, mouse/keyboard/screen control, browser automation/scraping, vo
 or wake word.
 
 MEDIUM/HIGH-risk actions require programmatic trusted confirmation through the
-supported gateway. The model may never authorize its own action. Stage 6 will
-introduce the bounded planner/controller; Stage 7 will add persistent memory.
+supported gateway. The model may never authorize its own action. Stage 6 adds the
+bounded planner/controller and CLI; Stage 7 adds bounded, user-approved SQLite memory.
+
+## Stage 7 — user-controlled SQLite memory
+
+The model proposes structured actions; trusted code validates, authorizes and
+executes them. Memory adds six tools to the same registry and Stage 4 gateway.
+No maintenance, SQL, Python, shell, database path, approval flag, or provenance
+override is exposed to the model. HIGH already requires confirmation in Stage 4;
+no permission policy was weakened or replaced.
+
+| Tool | Risk | Behavior |
+| --- | --- | --- |
+| `memory.list` | READ_ONLY | Bounded active records, newest first; optional category filter |
+| `memory.get` | READ_ONLY | One active record by opaque ID |
+| `memory.search` | READ_ONLY | Deterministic lexical relevance, category filter and result limit |
+| `memory.create` | MEDIUM | Store the exact reviewed content/category only after approval |
+| `memory.update` | MEDIUM | Confirmed full replacement of one record's editable fields |
+| `memory.delete` | HIGH | Confirmed deletion of one exact record, never a query or bulk operation |
+
+### Architecture and database
+
+`memory/models.py` defines JSON-only records; `validation.py` validates and
+normalizes input; `database.py` owns SQLite connections, transactions and schema;
+`repository.py` implements fixed-query CRUD and trusted expiration maintenance;
+`retrieval.py` ranks and bounds returned data. `tools/memory_tools.py` supplies the
+registry bindings. `main.py` initializes and installs the repository during
+development startup. Imports, repository construction, and tool registration do
+not open a database. Testing/production startup remains initialize-and-exit.
+
+The deterministic filename is **`memory.sqlite3` inside `JARVIS_DATA_DIR`**
+(default `F:\Work\Jarvis\data\memory.sqlite3`). Configure the application data
+directory in the trusted environment before startup; it is never a tool argument.
+Runtime directory creation is the existing trusted startup responsibility.
+Initialization creates an empty schema, not a conversation record. Corruption or
+schema errors leave the file in place and disable memory while other CLI tools
+remain available. Ordinary repository operations require an existing database and
+never create a replacement file if it disappears.
+
+Schema version 1 has two tables:
+
+| Table | Columns |
+| --- | --- |
+| `memories` | `id` (opaque 128-bit random ID, primary key), `category`, `content`, `created_at`, `updated_at`, nullable `expires_at`, `source`, `tags` (JSON text array) |
+| `schema_migrations` | `version` (primary key), `applied_at` (UTC) |
+
+Categories are `preference`, `fact`, `project`, `instruction`, and `note`.
+Provenance is always application-assigned `user_approved`; it does not assert that
+a claim is true or let the model claim consent. Timestamps are normalized to UTC
+with microseconds; expiration input must include a timezone. Indexes support
+recency and expiration. All SQL statements are application-owned; values are bound
+parameters. Each operation uses and closes its own connection. Writes use
+`BEGIN IMMEDIATE`, so capacity checks and mutations share the same lock/transaction.
+SQLite uses WAL, `synchronous=FULL`, a five-second busy timeout, and read
+transactions with `query_only=ON`. There are no automatic destructive retries.
+
+Only trusted initialization may migrate schemas. Version 1 initializes an empty
+database atomically; unknown/future versions or incompatible schemas fail closed.
+Future releases must add fixed numbered migrations and compatibility tests, with
+a backup before migration; they must never reset an existing database on error.
+
+### Consent and exact-action review
+
+Nothing automatically stores conversation text, results, system observations,
+discovered paths, inferred personal data, or model suggestions. Every mutation
+requires the existing expiring, single-use confirmation. The CLI displays the
+operation, exact JSON fields, category, ID (when applicable), and risk, and defaults
+to rejection. A model suggestion or an assertion of approval is not consent.
+
+Updates require the current `updated_at` as `expected_updated_at`, plus the full
+replacement content/category; omitted tags/expiration become empty. Deletes require
+the ID, expected version, category, and exact `expected_content`. The repository
+checks them atomically at execution. If another action changes the record after
+review, the approved mutation fails with `MEMORY_CONFLICT`; it does not overwrite
+or delete the newer record. A user must select an unambiguous record when search
+finds multiple matches. The adapter asks for selection, the CLI warns on review,
+and no query/category-only or bulk deletion is accepted.
+
+Example: ask "Remember that I prefer concise technical explanations", review the
+`memory.create` fields and approve. After restart, ask Jarvis to search its stored
+communication preferences. To change or forget one, first retrieve/select the
+record; review and approve the resulting update/delete. Answer `n` to leave data
+unchanged. Existing `exit`, `quit`, EOF, and interrupt handling remain available.
+
+### Limits and lexical search
+
+| Setting or constraint | Default | Allowed range |
+| --- | --- | --- |
+| `JARVIS_MEMORY_MAX_RECORDS` | 1,000 | 1–10,000 total records, including expired records |
+| `JARVIS_MEMORY_MAX_RESULTS` | 10 | 1–50 per retrieval |
+| `JARVIS_MEMORY_MAX_RESULT_BYTES` | 8,192 | 512–12,000 serialized JSON bytes |
+| Content | Up to 1,024 characters | Nonempty text; control/invisible format characters rejected |
+| Search query | Up to 256 characters | Nonempty lexical text |
+| Tags | Up to eight tags | 32 characters each; comma-separated input at most 256 characters |
+
+Requested tool limits cannot exceed trusted limits. Results are safely serialized,
+clearly labeled `untrusted_memory_data`, and marked `truncated` when records are
+omitted for count/byte bounds. A very small byte budget can omit even a single
+large record; increase the trusted budget to inspect it. Existing Stage 6 result,
+feedback and context bounds still apply as an additional boundary. The unchanged
+controller limits remain five actions and eight provider calls per task.
+
+Search uses case-folded exact phrase matches first, matched whole-token count
+second, updated timestamp third, and ID as a deterministic tie-breaker. It filters
+categories/expiration and examines no more than the configured record cap. Queries
+are never interpreted as SQL, wildcard expressions, or executable instructions.
+This is lexical search, not semantic understanding; there are no embeddings, FTS
+dependency, vector store, or second provider. If the database exceeds a newly
+lowered capacity setting, retrieval fails visibly instead of silently ranking only
+part of it.
+
+Retrieval is explicit through tools. There is no automatic injection into prompts.
+Even the `instruction` category remains untrusted reference data; it cannot add
+registered tools or change permissions, approvals, or budgets. Model compliance
+with prose is not the security boundary: every proposed action still crosses the
+fixed registry, schema validator, controller, and gateway.
+
+### Privacy, retention, and backup
+
+Conservative detection rejects obvious credential patterns (private keys, known
+API-token prefixes, bearer credentials, password/key assignments, credential URLs)
+and the configured Gemini key. Regex detection cannot recognize all secrets or
+sensitive personal information; do not approve their storage. Content and search
+queries are not logged. Diagnostics/audit contain only fixed events and IDs of
+error categories, never stored record contents or confirmation capabilities.
+
+The database is local plaintext protected by the OS/account's filesystem access;
+this is not encryption or a sandbox against other trusted local Python programs.
+Use a private data directory. Explicitly retrieved content is sent to Gemini as
+bounded tool-result data, subject to that provider's processing policies.
+
+Expired records are excluded from ordinary reads without mutation. Trusted setup
+may call `MemoryRepository.cleanup_expired()` to remove expired rows; it is not a
+model tool and is not run automatically. Deleted records disappear immediately
+from ordinary queries. **SQLite deletion is not forensic-grade secure erasure**:
+historical pages, WAL/journal files, filesystem snapshots, and backups can retain
+data. No unrestricted database reset or automatic bulk deletion tool exists.
+
+Back up with SQLite's backup API using trusted code, or stop all Jarvis processes
+and copy the complete consistent database state. Do not copy only the main file
+from a live WAL database and assume it is complete. Protect backups like the
+original, and account for deleted/expired content retained in older backups.
+
+Stable errors include `MEMORY_DATABASE_UNAVAILABLE`, `MEMORY_DATABASE_CORRUPT`,
+`MEMORY_INVALID_RECORD`, `MEMORY_RECORD_NOT_FOUND`, `MEMORY_CONFLICT`,
+`MEMORY_CAPACITY_EXCEEDED`, `MEMORY_STORAGE_FAILED`, `MEMORY_SCHEMA_UNSUPPORTED`,
+and `SECRET_DETECTED`. Messages do not reveal SQLite internals or record contents.
+
+### Stage 7 testing and release gate
+
+The initial working tree reported v0.6.1 but already had unfinished memory code:
+279 baseline tests ran with seven failures and one error from obsolete 16-tool
+expectations. All original tool assertions are retained; registry-size and binding
+expectations now include the six memory tools. New tests use temporary databases
+and never initialize or modify the developer's real memory database.
+
+Both required full-suite commands pass **317 tests** (279 existing plus 38 new):
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -W error -m unittest discover -s tests -v
+```
+
+Coverage includes persistence, schema versions, CRUD, fixed-query safety, limits,
+ranking, expiration, concurrent capacity/initialization, rollback, corruption,
+consent/rejection/expiry/replay, stale approvals, credential rejection, untrusted
+retrieval, bounded context, and real SDK continuation without network access.
+Live create/restart/recall/update/delete/reject and Calculator/CPU verification is
+a separate release gate. If Gemini is unavailable, report that gate as blocked
+and keep `core.__version__` at **0.6.1**; do not claim v0.7.0 released.
+
+Live verification on **2026-10-08** used the actual development CLI and Gemini,
+with a separate database under `data/stage7-verification-20261008`:
+
+| Check | Result |
+| --- | --- |
+| Startup | Passed: v0.6.1, 22 tools, security active |
+| Create with approval | Passed: zero rows before approval, exact category/content afterward, normal Gemini continuation |
+| Complete exit and restart | Passed: first process exited with code 0; fresh process retrieved the exact preference |
+| Update with approval | Passed: original value unchanged while pending; replacement verified in SQLite and a separate live retrieval |
+| Delete with HIGH confirmation | Passed: exact ID/category/content/version reviewed; deletion executed and zero rows verified |
+| Post-delete retrieval | Three retrieval calls completed with the empty database; final response was blocked by Gemini HTTP 429 `RESOURCE_EXHAUSTED` |
+| Reject a separate creation | Live check blocked by provider rate limit; covered by offline CLI/gateway tests |
+| Calculator and CPU | Stage 7 live checks blocked by provider rate limit; existing automated regression coverage passes |
+
+Live requests stopped at the rate limit. The verification database was left empty,
+and the CLI exited cleanly. The model initially asked for conversational selection
+before proposing deletion; selecting the exact returned record then produced the
+trusted HIGH confirmation. Natural-language wording can vary, so verification
+checks actual gateway execution and database state rather than trusting prose.
+**Stage 7 is implemented but not released.** Finish the remaining live checks after
+quota is available before promoting the canonical version to v0.7.0.
 
 ## Architecture
 
 Current startup:
 
 ```text
-main.py -> configuration -> runtime directories -> logging -> banner -> shutdown
+main.py -> configuration -> runtime directories -> logging -> banner
+  |-- development -> interface/cli.py -> text turns -> exit/quit/EOF -> shutdown
+  `-- testing/production -> shutdown
 ```
 
-Stage 5 active single-turn path:
+Stage 6 active task path:
 
 ```text
 User text
     ↓
-Stage 5 Brain (agent/brain.py)
+Brain.run_turn() -> Controller (isolated state, counters, fingerprints)
     ↓
-Provider abstraction (ai/base.py)
+Iterative Planner -> Provider abstraction (ai/base.py)
     ↓
 Gemini provider (ai/gemini.py)
     ↓
-Text ─────────────────────────────→ TurnResult (conversational)
+Text ─────────────────────────────→ TaskResult (COMPLETED)
 
 OR
 
@@ -343,16 +544,21 @@ Internal tool invocation → Stage 2 validation → ExecutionResult
     ↓
 Bounded sanitized result (ai/sanitize.py)
     ↓
-Gemini final response → TurnResult (tool_succeeded=True)
+Planner -> Gemini next action OR final text
+    ↑         bounded iterative loop; no recursion or retries
+Controller checks action/provider limits and repeated actions every step
 
 REQUIRE_CONFIRMATION (MEDIUM / HIGH)
     ↓
-TurnResult (confirmation_required=True)
-    TrustedConfirmation.confirmation_id retained separately — never in model context
+TaskResult (WAITING_FOR_CONFIRMATION)
+    Stage 4 ID retained privately in the controller — never in model context
+    CLI reviews exact arguments -> y/yes -> confirm_turn(turn_id) -> Stage 4
+    Successful confirmation -> same turn resumes with unchanged counters
+    No / expiry / denial / failure -> task terminates
 
 DENY
     ↓
-TurnResult (error_id=PERMISSION_DENIED) — no retry, no model workaround
+TaskResult (DENIED) — no retry, no model workaround
 ```
 
 Security-aware tool path (`execute_tool` delegates to this gateway):
@@ -480,6 +686,24 @@ with identifiers such as `INVALID_PATH`, `PATH_NOT_FOUND`, `NOT_A_DIRECTORY`,
 `INVALID_URL`, `UNSUPPORTED_URL_SCHEME`, `APP_NOT_ALLOWED`, `APP_NOT_FOUND`,
 `CROSS_DEVICE_MOVE`, `PROCESS_QUERY_FAILED`, and `TOOL_EXECUTION_FAILED`.
 
+For development-only Gemini diagnosis, set `$env:JARVIS_PROVIDER_DIAGNOSTICS='1'`
+before running `main.py`. This emits `provider_failure` metadata for
+`initial_proposal`, `tool_continuation`, or the Stage 5 `final_response` phase.
+It records only allowlisted exception classes/API categories, numeric HTTP status,
+and fixed reason codes (including `unsupported_content_role`); unknown details
+are withheld. It never emits raw exceptions, prompts, responses, tool arguments,
+results, paths, URLs, queries, credentials, headers, or confirmation IDs.
+Diagnostics are disabled unless explicitly enabled and are always suppressed in
+`testing` and `production`. Remove the variable to disable them. No retries are added.
+
+Gemini function feedback is a `Content(role="user")` containing a typed
+`Part(function_response=FunctionResponse(...))`, immediately after the preserved
+model function call. The name and optional call ID match that call. Stage 6
+reconstructs all call/result pairs in order, retaining original thought signatures;
+it uses `AUTO` for further steps, while Stage 5 `finish()` uses `NONE`.
+The SDK serializes these objects. Offline wire regressions enforce valid roles,
+matching names/IDs, binary signatures, and sanitized bounded feedback through Stage 4.
+
 Runtime locations are trusted local configuration, not a sandbox or path allowlist.
 Directories are created only when missing; a file occupying a directory path causes
 failure without overwrite. Logging requires write access to `jarvis.log`. There is
@@ -502,35 +726,46 @@ Jarvis/
 |-- config/
 |   |-- __init__.py
 |   |-- settings.py       # Settings + GeminiSettings; DEFAULT_GEMINI_MODEL
+|   |-- agent_settings.py # Trusted action/provider/context/pending limits
 |   `-- tool_settings.py  # Trusted aliases, search provider, extensions, limits
 |-- agent/
 |   |-- __init__.py
-|   |-- brain.py          # Single-turn coordinator; no autonomous loop
-|   |-- planner.py
-|   |-- controller.py
+|   |-- brain.py          # Bounded task API + Stage 5 compatibility API
+|   |-- planner.py        # Iterative next-step decisions; no execution authority
+|   |-- controller.py     # State machine, limits, progress and confirmation lifecycle
+|   |-- models.py         # TurnStatus, TaskResult, ActionReview
 |   `-- permissions.py
 |-- ai/
 |   |-- __init__.py       # Provider-independent AI contracts; no I/O on import
 |   |-- base.py           # Provider and ProviderTurn protocols
+|   |-- context.py        # Accumulated feedback bounds
 |   |-- models.py         # AssistantText, ToolCallProposal, ProviderError, TurnResult
 |   |-- gemini.py         # Official google-genai adapter; SDK objects stay here
 |   |-- sanitize.py       # Bounded JSON-only tool feedback for provider input
 |   `-- validation.py     # Untrusted provider output shape validation
+|-- interface/
+|   |-- __init__.py
+|   `-- cli.py            # Trusted text interaction and exact-action confirmation
 |-- tools/
 |   |-- __init__.py
 |   |-- base.py           # ToolMetadata
 |   |-- _support.py       # Error/metadata helpers, no dispatcher
-|   |-- registry.py       # Explicit 16-tool allowlist and detached descriptions
+|   |-- registry.py       # Explicit 22-tool allowlist and detached descriptions
 |   |-- schema.py         # Contract validation; defaults left to Python
 |   |-- _execution.py     # Internal preparation and sanitized invocation
 |   |-- executor.py       # Compatibility API delegates to security gateway
 |   |-- system_tools.py
 |   |-- app_tools.py
 |   |-- file_tools.py
-|   `-- browser_tools.py
+|   |-- browser_tools.py
+|   `-- memory_tools.py   # Six gateway-controlled memory operations
 |-- memory/
 |   |-- __init__.py
-|   `-- database.py
+|   |-- database.py       # Fixed SQLite schema, transactions and initialization
+|   |-- models.py
+|   |-- validation.py
+|   |-- repository.py
+|   `-- retrieval.py
 |-- security/
 |   |-- __init__.py
 |   |-- validator.py
@@ -557,7 +792,10 @@ Jarvis/
     |-- test_security_audit.py
     |-- test_ai_brain.py    # Offline single-turn tests through real Stage 4
     |-- test_ai_sanitize.py # Sanitizer bounds, secret exclusion, no mutation
-    `-- test_gemini.py      # Gemini adapter; SDK pin, declarations, wire test
+    |-- test_gemini.py      # Stage 5 adapter; SDK pin, declarations, wire test
+    |-- test_controller.py  # Multi-step state, limits, pause/resume, expiry and races
+    |-- test_cli.py         # Mocked input/output, defaults, interruption and privacy
+    `-- test_gemini_tasks.py # Bounded SDK task context and mock transport
 ```
 
 ## Setup and running (Windows PowerShell)
@@ -603,6 +841,11 @@ JARVIS
 Version: <current version from core.__version__>
 Environment: development
 Status: Ready
+AI: Gemini (Configured)
+Tools: 22
+Security: Active
+Type exit or quit to leave.
+You >
 ```
 
 JSON lifecycle logs appear on stderr and in `logs/jarvis.log` by default. Success
@@ -628,8 +871,10 @@ project root regardless of the process working directory; absolute paths are
 supported. Invalid values cause startup failure. Loading settings alone does not
 create directories.
 
-`GEMINI_API_KEY` is not loaded at startup and is never logged. It is read
-lazily when `Brain.run_turn()` is first called. Startup does not consume Gemini
+The CLI checks environment configuration locally at startup without an API request.
+It prints `AI: Not configured` plus setup guidance when missing or invalid.
+`GEMINI_API_KEY` is never logged. Each provider session loads it when requested.
+Startup does not consume Gemini
 API quota. Missing or blank `GEMINI_API_KEY` produces `AI_NOT_CONFIGURED` at
 request time, not at startup. A malformed key, model, or timeout produces
 `AI_INVALID_CONFIGURATION`.
@@ -731,12 +976,152 @@ print(open_project_in_vscode("."))
 
 Direct imports are for primitive development/tests only. All supported higher-level
 execution uses `execute_tool` or `request_execution`, enforcing Stage 4. Natural
-language is available through the explicit Stage 5 Python API below. Inspect `result.success`,
+language is available through the CLI and Stage 6 Python API below. Inspect `result.success`,
 `result.message`, `result.data`, and `result.error_id` rather than parsing log text.
 
-### Stage 5 provider and brain API
+### Stage 6 task API and limits
 
-`Brain(provider).run_turn(user_text)` returns a provider-independent `TurnResult`:
+`Brain(provider).run_turn(text)` returns an immutable `TaskResult` containing
+`status`, `text`, `error_id`, `failure_kind`, `provider_calls`, `tool_actions`, and
+`completed_actions`. When paused, it also returns an opaque `turn_id` (hidden from
+repr) and an immutable `ActionReview`: trusted tool name, description, risk, and
+exact schema-validated arguments serialized as JSON. No Stage 4 ID is returned.
+`brain.confirm_turn(turn_id)` and `brain.reject_turn(turn_id)` are trusted UI APIs,
+not tools. `brain.close()` cancels pending confirmations and releases their sessions.
+There is no `confirmed=True` request field or generic resume-from-model-text API.
+
+The planner asks for the next decision through `TaskProvider.task(text)`, whose
+session exposes `propose()` and `advance(feedback)`. The controller owns the loop
+and calls `security.gateway.request_execution()` for each accepted new action.
+The planner has no execution or permission authority, and neither it nor the
+controller imports Gemini types. Gemini retains signed call content inside its
+session and uses manual function declarations with automatic SDK execution disabled.
+The system instruction asks for one action per response; code rejects batches.
+
+All Stage 6 limits are trusted source constants in `config/agent_settings.py`.
+They cannot be overridden by a request, provider output, or environment variable:
+
+| Limit | Value | Behavior |
+| --- | --- | --- |
+| Tool actions per turn | 5 | Counts gateway requests, including a pending action once; confirmation does not count it twice |
+| Provider calls per turn | 8 | Counts attempts before calling the planner, including failures; independent defensive ceiling |
+| Pending turns per Brain | 32 | Capacity exhaustion cancels the new pending action and closes its session |
+| Pending-turn TTL | 300 seconds | Monotonic deadline measured before the pending action's gateway request |
+| Accumulated feedback | 32,768 JSON bytes | Replace oldest result data with null and set `truncated=true` until it fits |
+| Model content context | 262,144 bytes | Bound serialized request contents and retained signed call history; stop on excess |
+
+The action ceiling stops immediately after the fifth successful action, without
+an extra model call or sixth action. `completed_actions` reports completed work.
+The 8-call ceiling independently protects the provider boundary and leaves room
+above the normal one-decision-per-action pattern; malformed/no-progress responses
+already terminate on the first occurrence. There are no automatic provider or tool
+retries. Stage 5's network timeout and all per-result limits remain unchanged.
+
+Repeated-action detection hashes the exact tool name plus sorted, compact JSON of
+schema-validated arguments using SHA-256. Omitted schema defaults are filled only
+for this fingerprint, not the execution request. Any identical action seen earlier
+in the same turn is blocked with `REPEATED_ACTION`, including nonconsecutive repeats.
+This deliberately conservative policy does not try to infer meaningful progress
+from model text. Equivalent path spellings without identical validated JSON may
+have different fingerprints; the action ceiling still applies.
+
+Explicit states are `RUNNING`, `WAITING_FOR_CONFIRMATION`, `COMPLETED`, `DENIED`,
+`FAILED`, `ACTION_LIMIT_REACHED`, `PROVIDER_LIMIT_REACHED`, and `CANCELLED`.
+Running may pause or terminate. Waiting may resume after successful Stage 4
+confirmation, or terminate after rejection, expiry, denial or failure. Terminal
+states cannot resume. Invalid transitions fail closed (`CONTROLLER_STATE_FAILED`).
+Failures distinguish provider, invalid model response, invalid tool proposal,
+permission denial, tool execution, confirmation expiry, repeated action, limits,
+and controller state. They contain stable identifiers without raw exceptions.
+
+On confirmation-required, no later action or provider call runs. The controller
+privately retains the Stage 4 ID, exact review snapshot, planner session, counters,
+and fingerprints. CLI approval consumes the turn handle atomically and calls
+`confirm_execution()`; Stage 4 still checks its own expiry/policy and executes only
+the stored action. Only successful sanitized data is then sent to the planner.
+Rejection calls `reject_confirmation()` and terminates; expiry never regenerates
+authorization. Failure may follow an action that partially happened: inspect actual
+state before submitting a new request.
+
+Turn handles use `secrets.token_urlsafe(24)` (192 random bits, 32 characters), are
+distinct from Stage 4 IDs, and rotate at each new pause. A handle alone does not
+approve anything; only the trusted confirmation API can approve. Never send it to
+the provider. Atomic removal prevents replay and concurrent double approval.
+One Brain serializes calls under a lock, including synchronous provider waits;
+separate turns have isolated state. There is no user/account authentication or
+sandbox against trusted Python code invoking APIs directly.
+
+Expired entries are purged on new turns and checked on confirmation/rejection;
+`close()` releases all remaining entries. There is no background cleanup, so expired
+data may remain in bounded memory until the next operation or process exit. A new
+pause gets a fresh TTL but retains the original task budgets. Restarting loses all
+state. Cleanup never invokes a tool, and conversations are not persisted.
+
+Accumulated feedback preserves each action's success/truncation markers while
+discarding oldest payloads. Tool names remain in the adapter's original signed
+calls. Raw results, messages, failed results, and confirmation IDs never become
+feedback. Current user text, bounded feedback and signed calls are the only task
+history. Provider text is untrusted; deterministic status and counts remain the
+authority for whether work completed.
+
+Controller logs only fixed lifecycle/proposal/completion/pause/resume/failure/limit
+events. The CLI may display exact arguments for user review, but never logs them.
+It escapes terminal controls and redacts the configured API key from output.
+Stage 4 remains the sole authorization and security-audit authority.
+
+### Development CLI and manual verification
+
+No new dependency is required. `main.py` composes the existing startup foundation,
+Brain and Gemini provider; `interface/cli.py` owns input/output and confirmation.
+Default `JARVIS_ENV=development` enters the CLI even without a key, displaying local
+setup guidance. Testing/production retain initialize-and-exit behavior.
+Configuration status is a local check, not a remote credential validation.
+
+```powershell
+cd F:\Work\Jarvis
+$env:JARVIS_ENV = "development"
+$env:GEMINI_API_KEY = "<developer supplies locally>"
+.\.venv\Scripts\python.exe main.py
+```
+
+After automated tests pass, these optional live checks consume API quota. Run
+individually; the calculator example opens a real application:
+
+```text
+You > Hello Jarvis
+You > What is my current CPU usage?
+You > Check my CPU and memory usage and tell me how my system is doing.
+You > Open calculator.
+You > Create the directory data/stage6-approved-test using file.create_directory.
+Proceed? [y/N] > y
+You > Create the directory data/stage6-rejected-test using file.create_directory.
+Proceed? [y/N] > n
+You > exit
+```
+
+Use fresh names within the project's test `data` folder, with its existing parent.
+Verify no directory appears before approval and the rejected directory never
+appears. Existing paths are never overwritten. The CLI shows the tool, risk,
+description and exact JSON arguments before asking; inspect them before approval.
+Only case-insensitive `y` and `yes`, trimmed of surrounding whitespace, approve.
+Blank, `n`, and all other responses reject. Approval input never goes to Gemini.
+`exit` or `quit` exits at the main prompt; at a confirmation prompt either rejects.
+EOF exits cleanly; Ctrl+C cancels pending work and returns code 130. An OS action
+already in progress cannot be rolled back by interruption. There is no shell syntax.
+
+Automated CLI tests mock input/output, provider and launches; SDK task tests use
+real serialization with an in-memory HTTP transport. Controller tests cover
+sequential execution, budgets, repetitive/no-progress providers, confirmation
+pause/resume, policy recheck, expiry, rejection, replay/races, isolated turns,
+capacity/cleanup, immutable review state, privacy and context bounds. The original
+216 tests retain their assertions; single-action tests explicitly call the retained
+`run_single_turn()` API, and startup tests mock the newly introduced CLI boundary.
+No live Gemini verification is part of automated tests. Stage 6 added no voice, persistent memory,
+GUI, browser automation, or unrestricted autonomous execution is introduced.
+
+### Retained Stage 5 single-action API
+
+`Brain(provider).run_single_turn(user_text)` returns the original provider-independent `TurnResult`:
 `text`, `error_id`, `tool_succeeded` (None before execution), `confirmation`, and
 application-only `trusted_confirmation`. `confirmation_required` is a property.
 Successful execution remains visible through `tool_succeeded=True` even when final
@@ -747,10 +1132,10 @@ wording fails; Jarvis never retries that action automatically.
 `ProviderError(error_id)`. `finish(sanitized_result)` is called only after a
 successful automatically allowed action. `GeminiProvider()` implements this
 interface and creates/closes one SDK client per turn. Core agent code imports no
-Gemini SDK types. There is no cross-turn history or database storage.
+Gemini SDK types. There is no automatic cross-turn conversation history or storage.
 
 `build_tool_declarations()` translates exactly `REGISTRY.list_metadata()` into
-16 `FunctionDeclaration` objects: exact names, trusted descriptions, and detached
+22 `FunctionDeclaration` objects: exact names, trusted descriptions, and detached
 `parameters_json_schema`. No raw callable or confirmation/rejection API is passed
 to the SDK. Each request uses `AutomaticFunctionCallingConfig(disable=True)`;
 the first request uses mode `AUTO`, the final wording request uses `NONE`.
@@ -790,8 +1175,8 @@ For confirmation, the brain returns trusted metadata in `ConfirmationRequired`
 and the real ID only in `TrustedConfirmation.confirmation_id`, excluded from repr.
 It does not call `finish()` or send pending data to Gemini. Treat the full
 `TurnResult` as application state: do not serialize it wholesale into a prompt or
-log. The future UI must retain the ID and show the exact requested target before
-explicit approval. Stage 5 adds no confirmation UI and never infers approval from
+log. Callers of this compatibility API must retain the ID and show the exact requested target before
+explicit approval. This API adds no confirmation UI and never infers approval from
 text. Denials and failures stop deterministically with no provider workaround.
 
 Provider error identifiers:
@@ -827,7 +1212,7 @@ key, quota, network or external application is required. Python 3.14 triggers on
 known upstream SDK import deprecation; only that exact warning in `google.genai.types`
 is filtered during import. All other warnings remain subject to `-W error`.
 
-### Optional manual Gemini verification
+### Optional Stage 5 Python verification
 
 Automated verification does not use a real Gemini key. To opt into live requests,
 set your own key locally, then open the interpreter:
@@ -846,10 +1231,10 @@ from agent.brain import Brain
 from ai.gemini import GeminiProvider
 brain = Brain(GeminiProvider())
 
-print(brain.run_turn("What is a CPU?").text)  # Conversational; no tool needed.
-print(brain.run_turn("Use system.get_cpu_info to report my CPU core counts.").text)
-print(brain.run_turn("Open Notepad using app.open_application.").text)  # LOW launch.
-pending = brain.run_turn("Use file.create_directory to create data/stage5-example.")
+print(brain.run_single_turn("What is a CPU?").text)  # Conversational; no tool needed.
+print(brain.run_single_turn("Use system.get_cpu_info to report my CPU core counts.").text)
+print(brain.run_single_turn("Open Notepad using app.open_application.").text)  # LOW launch.
+pending = brain.run_single_turn("Use file.create_directory to create data/stage5-example.")
 print(pending.text, pending.confirmation_required)  # MEDIUM: must stop for approval.
 ```
 
@@ -868,7 +1253,7 @@ No live Gemini verification was performed during Stage 5 implementation. Existin
 filesystem race, local-Python trust, audit durability, and target-review limitations
 still apply. The system instruction guides language behavior but cannot guarantee
 truthful prose; deterministic gateway results remain authoritative. There is no
-autonomous planner, persistent memory, desktop UI, or background agent.
+unrestricted autonomous agent, persistent memory, desktop UI, or background agent.
 
 ## V1 development roadmap
 
@@ -879,15 +1264,14 @@ autonomous planner, persistent memory, desktop UI, or background agent.
 | 3 | Tool registry and standardized execution | Implemented |
 | 4 | Permission and security engine | Implemented |
 | 5 | LLM provider integration and structured tool calling | Implemented |
-| 6 | Planner/controller and bounded multi-step execution | Next — not implemented |
-| 7 | SQLite memory | Planned |
+| 6 | Planner/controller, bounded multi-step execution and development CLI | Implemented |
+| 7 | SQLite memory | Implemented — release verification pending |
 | 8 | Basic desktop interface | Planned |
 | 9 | Testing, failure recovery, security hardening | Planned |
 | 10 | Windows packaging and normal desktop usage | Planned |
 
-Stage 5 stops at a single conversational turn with zero or one model-proposed
-action. Stage 6 remains next: bounded planning, a controller state machine,
-multi-step tasks, failure/recovery behavior, and explicit stopping conditions.
+Stage 6 stops at bounded in-memory task execution and a text development CLI.
+Stage 7 persistent memory is implemented; its release requires automated and live verification.
 Each stage requires its own scope and approval.
 
 Future versions may add speech-to-text, text-to-speech, a wake word, screen
@@ -895,6 +1279,54 @@ understanding, deeper Windows integration, local AI, reusable workflows, and
 carefully bounded autonomous tasks.
 
 ## Changelog
+
+### Unreleased — Stage 7 SQLite memory (2026-10-08)
+
+- Added persistent, opt-in memory with six narrow registered operations and the
+  existing MEDIUM/HIGH exact-action confirmation flow.
+- Added fixed-query SQLite storage, atomic capacity enforcement, stale-record
+  protection, schema version checks, explicit retention maintenance, lexical
+  ranking and bounded untrusted retrieval. No dependencies or Stage 8 work added.
+- Added secret-pattern checks, fixed safe errors, CLI consent guidance, and
+  temporary-database regression coverage. Both suites pass 317 tests.
+- Canonical version remains v0.6.1 until required live verification succeeds.
+- Live creation, restart persistence, update/retrieval and confirmed deletion
+  passed on 2026-10-08. HTTP 429 blocked the remaining rejection and Calculator/CPU
+  live checks. The isolated verification database is empty; release is withheld.
+
+### 0.6.1 — 2026-10-08
+
+- Reproduced `google.genai.errors.ClientError`, HTTP 400 `INVALID_ARGUMENT`,
+  during `tool_continuation`, after one successful Stage 4 action. The provider
+  rejected the content role. Changed function-response content from `tool` to
+  `user` in both Stage 6 `advance()` and Stage 5 `finish()`; the earlier adapter
+  already contained this defect, and Stage 6 repeated it.
+- Preserved typed SDK parts, original signed model content, function names/IDs,
+  chronological history, manual execution, all controller limits, and sanitization.
+- Added opt-in development-only provider metadata diagnostics and five offline
+  regressions, including real SDK transport serialization through Stage 4.
+  All three continuation regressions fail with the original roles.
+- Both full test commands pass 279 tests (274 existing plus five new tests).
+- Confirmed multiple sequential actions through the security gateway and real SDK
+  continuation, including sequential READ_ONLY tool calls in the transport trace
+  (`system.get_cpu_usage` followed by `system.get_memory_info`).
+- Validated all security boundaries, offline fake providers, and exact-action
+  confirmation gating prior to release promotion.
+
+### 0.6.0 — 2026-10-06
+
+- Added an iterative planner and deterministic controller with isolated state,
+  action/provider budgets, canonical repeated-action detection, and no tool retries.
+- Added confirmation pause/resume, single-use opaque turn handles, rejection,
+  expiry, bounded synchronized pending storage, and context cleanup.
+- Kept every action and confirmation behind Stage 4; no changes to tool authorization.
+- Added bounded accumulated feedback and multi-step Gemini sessions preserving signed
+  function-call content, with automatic SDK execution still disabled.
+- Added a standard-library development CLI with explicit exact-action approval,
+  default rejection, safe output, exit/quit, Ctrl+C and EOF handling.
+- Retained Stage 5 behavior under `Brain.run_single_turn()` and added offline
+  controller, CLI, context, replay, failure, concurrency and SDK-transport tests.
+- Added no dependencies, persistent memory, voice, GUI, or shell capabilities.
 
 ### 0.5.0 — 2026-10-05
 

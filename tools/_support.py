@@ -35,6 +35,15 @@ _MESSAGES = {
     "APP_NOT_FOUND": "The allowed application was not found in a supported location.",
     "BROWSER_OPEN_FAILED": "The browser launch request was not accepted.",
     "PROCESS_QUERY_FAILED": "The process summary could not be retrieved.",
+    "MEMORY_DATABASE_UNAVAILABLE": "Memory storage is currently unavailable.",
+    "MEMORY_DATABASE_CORRUPT": "Memory storage is corrupted and cannot be accessed.",
+    "MEMORY_RECORD_NOT_FOUND": "The specified memory record was not found.",
+    "MEMORY_CAPACITY_EXCEEDED": "Memory storage limit has been reached.",
+    "MEMORY_SCHEMA_UNSUPPORTED": "Unsupported memory schema version.",
+    "MEMORY_INVALID_RECORD": "Memory fields are invalid or exceed their limits.",
+    "MEMORY_CONFLICT": "The memory changed or conflicts with an existing record. Review it again.",
+    "MEMORY_STORAGE_FAILED": "The memory operation failed. Check its state before retrying.",
+    "SECRET_DETECTED": "Content contains sensitive credentials or secrets and cannot be stored.",
     "TOOL_EXECUTION_FAILED": "The operation could not be completed.",
 }
 

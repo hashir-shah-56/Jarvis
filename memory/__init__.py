@@ -1,1 +1,11 @@
-"""Reserved for Stage 7 memory; no persistence backend is initialized."""
+"""Persistent, secure, bounded SQLite memory subsystem."""
+
+from memory.models import MemoryCategory, MemoryRecord, MemorySource
+from memory.repository import MemoryRepository
+
+__all__ = [
+    "MemoryCategory",
+    "MemoryRecord",
+    "MemorySource",
+    "MemoryRepository",
+]

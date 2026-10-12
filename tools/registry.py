@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 
 from core.models import ExecutionResult
-from tools import app_tools, browser_tools, file_tools, system_tools
+from tools import app_tools, browser_tools, file_tools, memory_tools, system_tools
 from tools.base import ToolMetadata
 
 
@@ -87,4 +87,10 @@ REGISTRY = ToolRegistry((
     RegisteredTool(file_tools.MOVE_PATH_METADATA, file_tools.move_path),
     RegisteredTool(browser_tools.OPEN_URL_METADATA, browser_tools.open_url),
     RegisteredTool(browser_tools.SEARCH_WEB_METADATA, browser_tools.search_web),
+    RegisteredTool(memory_tools.LIST_METADATA, memory_tools.list),
+    RegisteredTool(memory_tools.GET_METADATA, memory_tools.get),
+    RegisteredTool(memory_tools.SEARCH_METADATA, memory_tools.search),
+    RegisteredTool(memory_tools.CREATE_METADATA, memory_tools.create),
+    RegisteredTool(memory_tools.UPDATE_METADATA, memory_tools.update),
+    RegisteredTool(memory_tools.DELETE_METADATA, memory_tools.delete),
 ))

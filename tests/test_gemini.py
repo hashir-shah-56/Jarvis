@@ -75,7 +75,7 @@ class GeminiTests(unittest.TestCase):
     def test_declarations_exactly_match_registry_and_are_detached(self):
         declarations = build_tool_declarations()
         metadata = REGISTRY.list_metadata()
-        self.assertEqual(len(declarations), 16)
+        self.assertEqual(len(declarations), 22)
         self.assertEqual(declarations, build_tool_declarations())
         for declaration, item in zip(declarations, metadata):
             self.assertEqual(declaration.name, item["name"])
@@ -106,7 +106,7 @@ class GeminiTests(unittest.TestCase):
     def test_multiple_calls_execute_none(self):
         self.generate.return_value = response(call(), call())
         with patch("security.gateway.request_execution") as execute:
-            result = Brain(GeminiProvider()).run_turn("Do two actions")
+            result = Brain(GeminiProvider()).run_single_turn("Do two actions")
         self.assertEqual(result.error_id, "AI_MULTIPLE_TOOL_CALLS")
         execute.assert_not_called()
         self.generate.assert_called_once()
@@ -120,13 +120,13 @@ class GeminiTests(unittest.TestCase):
         provider = GeminiProvider()
         self.factory.assert_not_called()
         with patch.dict(os.environ, {}, clear=True):
-            result = Brain(provider).run_turn("Hello")
+            result = Brain(provider).run_single_turn("Hello")
         self.assertEqual(result.error_id, "AI_NOT_CONFIGURED")
         self.factory.assert_not_called()
 
     def test_manual_config_timeout_no_retry_and_client_cleanup(self):
         self.generate.return_value = response(types.Part(text="hello"))
-        self.assertEqual(Brain(GeminiProvider()).run_turn("Hi").text, "hello")
+        self.assertEqual(Brain(GeminiProvider()).run_single_turn("Hi").text, "hello")
         options = self.factory.call_args.kwargs
         self.assertEqual(options["api_key"], FAKE_KEY)
         self.assertFalse(options["vertexai"])
@@ -136,7 +136,7 @@ class GeminiTests(unittest.TestCase):
         config = self.generate.call_args.kwargs["config"]
         self.assertTrue(config.automatic_function_calling.disable)
         self.assertEqual(config.tool_config.function_calling_config.mode, "AUTO")
-        self.assertEqual(len(config.tools[0].function_declarations), 16)
+        self.assertEqual(len(config.tools[0].function_declarations), 22)
         self.assertNotIn(FAKE_KEY, config.model_dump_json())
         self.client.close.assert_called_once()
 
@@ -179,17 +179,17 @@ class GeminiTests(unittest.TestCase):
         ):
             self.generate.side_effect = exception
             with self.assertLogs("jarvis.ai", level="DEBUG") as logs:
-                result = Brain(GeminiProvider()).run_turn("Hello")
+                result = Brain(GeminiProvider()).run_single_turn("Hello")
             self.assertEqual(result.error_id, expected)
             self.assertNotIn(FAKE_KEY, repr(result) + " ".join(logs.output))
 
     def test_key_cannot_enter_prompt_or_tool_arguments(self):
-        result = Brain(GeminiProvider()).run_turn("Use " + FAKE_KEY)
+        result = Brain(GeminiProvider()).run_single_turn("Use " + FAKE_KEY)
         self.assertEqual(result.error_id, "AI_INVALID_INPUT")
         self.generate.assert_not_called()
         self.generate.return_value = response(call("browser.search_web", {"query": FAKE_KEY}))
         with patch("security.gateway.request_execution") as execute:
-            self.assertEqual(Brain(GeminiProvider()).run_turn("hello").error_id, "AI_INVALID_RESPONSE")
+            self.assertEqual(Brain(GeminiProvider()).run_single_turn("hello").error_id, "AI_INVALID_RESPONSE")
         execute.assert_not_called()
 
     def test_key_redacted_from_text_and_feedback(self):
@@ -214,5 +214,5 @@ class GeminiTests(unittest.TestCase):
                 with GeminiProvider().turn("hello") as turn:
                     self.assertEqual(turn.propose(), ToolCallProposal("system.get_cpu_info", {}))
         self.assertEqual(len(seen), 1)
-        self.assertEqual(len(seen[0]["tools"][0]["functionDeclarations"]), 16)
+        self.assertEqual(len(seen[0]["tools"][0]["functionDeclarations"]), 22)
         self.assertNotIn(FAKE_KEY, json.dumps(seen))
